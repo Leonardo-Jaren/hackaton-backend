@@ -5,17 +5,18 @@ from ..models import (
     Transaccion, MetodoPago, CategoriaTransaccion,
     FondoCaja, ArchivoIA, ResultadoIA, Empresa
 )
+from .gemini_service import GeminiService
 from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Dict
 import os
-import base64
 import json
 
 
 class TransaccionService:
     def __init__(self):
         self.repo = TransaccionRepository()
+        self.gemini_service = GeminiService()
     
     # ==================== FONDO DE CAJA ====================
     
@@ -119,124 +120,23 @@ class TransaccionService:
             raise
     
     def _procesar_imagen(self, file_path: str, empresa: Empresa) -> dict:
-        """Procesa una imagen usando GPT-4o Vision"""
+        """Procesa una imagen usando Google Gemini"""
         try:
-            from openai import OpenAI
-            client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-            
-            # Leer y codificar la imagen
-            with open(file_path, 'rb') as image_file:
-                base64_image = base64.b64encode(image_file.read()).decode('utf-8')
-            
-            # Prompt para GPT-4o
-            prompt = f"""
-            Analiza esta imagen de comprobantes/tickets de {empresa.nombre}.
-            Extrae TODAS las transacciones visibles y devuelve un JSON con el siguiente formato:
-            
-            {{
-                "transacciones": [
-                    {{
-                        "tipo": "ingreso" o "gasto",
-                        "monto": número decimal,
-                        "descripcion": "descripción detallada",
-                        "categoria_sugerida": "nombre de categoría",
-                        "metodo_pago_sugerido": "Efectivo/Tarjeta/Transferencia/Yape/Plin",
-                        "numero_comprobante": "número si existe",
-                        "confianza": porcentaje de confianza (0-100)
-                    }}
-                ]
-            }}
-            
-            Categorías comunes: Ventas, Compras, Servicios, Suministros, Gastos Operativos, Otros.
-            Sé preciso con los montos y extrae TODO lo visible.
-            """
-            
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{base64_image}"
-                                }
-                            }
-                        ]
-                    }
-                ],
-                max_tokens=2000,
-                temperature=0.2
-            )
-            
-            # Parsear respuesta
-            content = response.choices[0].message.content
-            # Extraer JSON de la respuesta (puede venir con markdown)
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0]
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0]
-            
-            resultado = json.loads(content.strip())
-            return resultado
-            
+            return self.gemini_service.procesar_imagen_comprobante(file_path, empresa)
         except Exception as e:
-            raise ValidationError(f"Error al procesar imagen con GPT-4o: {str(e)}")
+            raise ValidationError(f"Error al procesar imagen con Gemini: {str(e)}")
     
     def _procesar_pdf(self, file_path: str, empresa: Empresa) -> dict:
         """Procesa un PDF (implementar según necesidad)"""
-        # TODO: Implementar extracción de texto del PDF y procesamiento con GPT-4
+        # TODO: Implementar extracción de texto del PDF y procesamiento con Gemini
         raise ValidationError("Procesamiento de PDF aún no implementado")
     
     def _procesar_excel(self, file_path: str, empresa: Empresa) -> dict:
-        """Procesa un archivo Excel"""
+        """Procesa un archivo Excel con Google Gemini"""
         try:
-            import pandas as pd
-            from openai import OpenAI
-            client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-            
-            # Leer Excel
-            df = pd.read_excel(file_path)
-            
-            # Convertir a texto para GPT
-            excel_text = df.to_string()
-            
-            prompt = f"""
-            Analiza esta tabla de Excel de {empresa.nombre} y extrae las transacciones.
-            
-            Datos:
-            {excel_text}
-            
-            Devuelve un JSON con el siguiente formato:
-            {{
-                "transacciones": [
-                    {{
-                        "tipo": "ingreso" o "gasto",
-                        "monto": número decimal,
-                        "descripcion": "descripción",
-                        "categoria_sugerida": "categoría",
-                        "metodo_pago_sugerido": "método",
-                        "numero_comprobante": "número",
-                        "confianza": porcentaje (0-100)
-                    }}
-                ]
-            }}
-            """
-            
-            response = client.chat.completions.create(
-                model="gpt-4-turbo-preview",
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"},
-                temperature=0.2
-            )
-            
-            resultado = json.loads(response.choices[0].message.content)
-            return resultado
-            
+            return self.gemini_service.procesar_excel_transacciones(file_path, empresa)
         except Exception as e:
-            raise ValidationError(f"Error al procesar Excel: {str(e)}")
+            raise ValidationError(f"Error al procesar Excel con Gemini: {str(e)}")
     
     def _crear_resultados_ia(self, archivo: ArchivoIA, resultado: dict):
         """Crea registros de ResultadoIA a partir del JSON"""
