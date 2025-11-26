@@ -5,4 +5,5 @@ app_name = 'api'
 urlpatterns = [
     path('', include('users.urls')),
     path('', include('cierre_caja.urls')),
+    path('', include('transacciones.urls')),
 ]
