@@ -2,6 +2,7 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.utils import timezone
 from django.conf import settings
+from users.options import ROL_CHOICES
 
 class CustomUserManager(BaseUserManager):
     def create_user(self, email, password=None, **extra_fields):
@@ -36,6 +37,12 @@ class CustomUser(AbstractUser):
     
     # Campo para la foto de perfil del usuario
     avatar_url = models.URLField(max_length=200, blank=True, null=True)
+    
+    # Campo de rol del usuario
+    rol = models.CharField(max_length=20, choices=ROL_CHOICES, default='cajero', verbose_name='Rol')
+    
+    # Relación con Empresa
+    empresa = models.ForeignKey('core.Empresa', on_delete=models.CASCADE, related_name='usuarios', null=True, blank=True, verbose_name='Empresa')
     
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []  # Elimina username de los campos requeridos

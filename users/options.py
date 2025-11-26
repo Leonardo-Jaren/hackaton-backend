@@ -1,4 +1,4 @@
 ROL_CHOICES = [
-    ('admin', 'Admin'),
-    ('user', 'User'),
+    ('administrador', 'Administrador'),
+    ('cajero', 'Cajero'),
 ]

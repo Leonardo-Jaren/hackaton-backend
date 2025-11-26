@@ -40,6 +40,9 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     # Apps creadas para el proyecto
     'users',
+    'transacciones',
+    'core',
+    'cierre_caja',
     # Apps de terceros
     'rest_framework',
     'corsheaders',
