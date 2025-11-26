@@ -65,6 +65,7 @@ instance/
 # Scrapy stuff:
 .scrapy
 
+temp_auto_push.bat
 # Sphinx documentation
 docs/_build/
 
@@ -115,7 +116,6 @@ dmypy.json
 .pyre/
 
 # IDEs
-.vscode/
 .idea/
 *.swp
 *.swo
@@ -133,3 +133,5 @@ migrations/
 **/migrations/*.py
 !**/migrations/__init__.py
 media/
+uploads/.gitignore
+branch_structure.json
