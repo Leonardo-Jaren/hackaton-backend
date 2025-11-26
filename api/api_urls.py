@@ -6,5 +6,5 @@ urlpatterns = [
     path('', include('users.urls')),
     path('', include('cierre_caja.urls')),
     path('', include('core.urls')),
-    path('', include('transacciones')),
+    path('', include('transacciones.urls')),
 ]
