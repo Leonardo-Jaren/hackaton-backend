@@ -120,11 +120,30 @@ class TransaccionService:
             raise
     
     def _procesar_imagen(self, file_path: str, empresa: Empresa) -> dict:
-        """Procesa una imagen usando Google Gemini"""
+        """Procesa una imagen usando OpenAI GPT-4o Vision"""
         try:
-            return self.gemini_service.procesar_imagen_comprobante(file_path, empresa)
+            # Validar que el archivo existe
+            if not os.path.exists(file_path):
+                raise ValidationError(f"El archivo no existe: {file_path}")
+            
+            # Validar tamaño del archivo (no más de 20MB para imágenes)
+            file_size = os.path.getsize(file_path)
+            if file_size > 20 * 1024 * 1024:
+                raise ValidationError("La imagen es demasiado grande (máximo 20MB)")
+            
+            # Procesar con OpenAI
+            resultado = self.gemini_service.procesar_imagen_comprobante(file_path, empresa)
+            
+            # Validar que se obtuvieron resultados
+            if not resultado.get('transacciones'):
+                raise ValidationError("No se pudieron extraer transacciones de la imagen. Por favor, verifica que la imagen sea clara y legible.")
+            
+            return resultado
+            
+        except ValidationError:
+            raise
         except Exception as e:
-            raise ValidationError(f"Error al procesar imagen con Gemini: {str(e)}")
+            raise ValidationError(f"Error al procesar imagen con IA: {str(e)}")
     
     def _procesar_pdf(self, file_path: str, empresa: Empresa) -> dict:
         """Procesa un PDF (implementar según necesidad)"""

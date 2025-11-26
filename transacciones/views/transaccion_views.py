@@ -27,7 +27,7 @@ from ..services.transaccion_service import TransaccionService
 
 class FondoCajaCreateView(APIView):
     """
-    POST /api/v1/transacciones/fondo-caja/
+    POST /api/transacciones/fondo-caja/
     Crear el Saldo Inicial (Fondo de Caja)
     
     Body:
@@ -82,7 +82,7 @@ class FondoCajaCreateView(APIView):
 
 class TransaccionRegistroView(APIView):
     """
-    POST /api/v1/transacciones/registro/
+    POST /api/transacciones/registro/
     Registrar una Transacción Manual
     
     Body:
@@ -96,7 +96,7 @@ class TransaccionRegistroView(APIView):
         "numero_comprobante": "B001-00123"
     }
     
-    GET /api/v1/transacciones/registro/?empresa_id=1&fecha=2025-11-26
+    GET /api/transacciones/registro/?empresa_id=1&fecha=2025-11-26
     Obtener todas las Transacciones del día
     """
     permission_classes = [IsAuthenticated]
@@ -169,10 +169,10 @@ class TransaccionRegistroView(APIView):
 
 class TransaccionDetailView(APIView):
     """
-    PUT /api/v1/transacciones/registro/<pk>/
+    PUT /api/transacciones/registro/<pk>/
     Actualizar una transacción
     
-    DELETE /api/v1/transacciones/registro/<pk>/
+    DELETE /api/transacciones/registro/<pk>/
     Eliminar una transacción
     """
     permission_classes = [IsAuthenticated]
@@ -213,11 +213,18 @@ class TransaccionDetailView(APIView):
 class CargaDataIAView(APIView):
     """
     POST /api/v1/transacciones/carga-data/
-    Subir archivo/foto para procesamiento de IA
+    Subir foto de CUADERNO/REGISTRO MANUAL para procesamiento de IA
+    
+    Caso de uso: Automatizar el cierre de caja procesando fotos de registros manuales
+    donde se anotan las transacciones del día (ingresos y gastos escritos a mano)
+    
+    La IA identifica automáticamente si cada transacción es:
+    - INGRESO: ventas, cobros, dinero que entra
+    - GASTO: compras, pagos, gastos operativos, dinero que sale
     
     Form-data:
     - empresa: 1
-    - archivo: [file]
+    - archivo: [foto del cuaderno de registro]
     """
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
@@ -262,10 +269,10 @@ class CargaDataIAView(APIView):
 
 class ResultadosIAView(APIView):
     """
-    GET /api/v1/transacciones/resultados-ia/?archivo_id=1&empresa_id=1
+    GET /api/transacciones/resultados-ia/?archivo_id=1&empresa_id=1
     Obtener los resultados del procesamiento de la IA
     
-    POST /api/v1/transacciones/resultados-ia/convertir/
+    POST /api/transacciones/resultados-ia/convertir/
     Convertir un resultado de IA en transacción
     Body: { "resultado_id": 5 }
     """

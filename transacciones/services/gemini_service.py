@@ -11,7 +11,8 @@ Funcionalidades principales:
 import os
 import json
 import base64
-from typing import Dict, List, Optional, Tuple
+import pandas as pd
+from typing import Dict, List
 from decimal import Decimal
 from datetime import datetime, date
 from openai import OpenAI
@@ -20,7 +21,6 @@ from django.conf import settings
 
 from ..models import (
     Empresa, CategoriaTransaccion, MetodoPago,
-    ArchivoIA, ResultadoIA
 )
 
 
@@ -41,18 +41,35 @@ class GeminiService:
     
     def procesar_imagen_comprobante(self, image_path: str, empresa: Empresa) -> Dict:
         """
-        FUNCIÓN 1: Extrae información de tickets, facturas o comprobantes
+        FUNCIÓN 1: Extrae información de registros manuales de transacciones
         
         Casos de uso:
-        - Foto de ticket de venta
-        - Factura escaneada
-        - Comprobante de pago
-        - Boleta de servicio
+        - Foto de cuaderno de registro de ventas/gastos (escrito a mano)
+        - Foto de hoja de control diario de ingresos y egresos
+        - Registro manual de transacciones (ventas, compras, gastos)
+        - Lista de movimientos del día anotados en papel
+        
+        La IA identifica automáticamente si cada transacción es INGRESO o GASTO
         
         Returns:
-            Dict con transacciones detectadas y metadatos
+            Dict con transacciones detectadas (ingresos y gastos) y metadatos
         """
         try:
+            # Detectar el tipo MIME de la imagen
+            import mimetypes
+            mime_type, _ = mimetypes.guess_type(image_path)
+            if not mime_type:
+                # Detectar por extensión
+                ext = os.path.splitext(image_path)[1].lower()
+                mime_map = {
+                    '.jpg': 'image/jpeg',
+                    '.jpeg': 'image/jpeg',
+                    '.png': 'image/png',
+                    '.webp': 'image/webp',
+                    '.gif': 'image/gif'
+                }
+                mime_type = mime_map.get(ext, 'image/jpeg')
+            
             # Leer y codificar la imagen en base64
             with open(image_path, 'rb') as image_file:
                 base64_image = base64.b64encode(image_file.read()).decode('utf-8')
@@ -65,30 +82,41 @@ class GeminiService:
                 model=self.model,
                 messages=[
                     {
+                        "role": "system",
+                        "content": "Eres un experto contador peruano con experiencia en análisis de comprobantes de pago. Tu trabajo es extraer información precisa de tickets, facturas y boletas."
+                    },
+                    {
                         "role": "user",
                         "content": [
                             {"type": "text", "text": prompt},
                             {
                                 "type": "image_url",
                                 "image_url": {
-                                    "url": f"data:image/jpeg;base64,{base64_image}"
+                                    "url": f"data:{mime_type};base64,{base64_image}",
+                                    "detail": "high"  # Máxima calidad de análisis
                                 }
                             }
                         ]
                     }
                 ],
-                max_tokens=2000,
-                temperature=0.2
+                max_tokens=3000,
+                temperature=0.1  # Muy baja temperatura para máxima precisión
             )
             
             # Parsear respuesta JSON
             resultado = self._parse_json_response(response.choices[0].message.content)
+            
+            # Validar estructura básica
+            if 'transacciones' not in resultado:
+                raise ValidationError("La IA no pudo extraer transacciones de la imagen")
             
             # Validar y enriquecer datos
             resultado = self._validar_y_enriquecer(resultado, empresa)
             
             return resultado
             
+        except FileNotFoundError:
+            raise ValidationError(f"No se encontró el archivo de imagen: {image_path}")
         except Exception as e:
             raise ValidationError(f"Error al procesar imagen: {str(e)}")
     
@@ -104,9 +132,7 @@ class GeminiService:
         Returns:
             Dict con transacciones normalizadas
         """
-        try:
-            import pandas as pd
-            
+        try:            
             # Leer Excel
             df = pd.read_excel(excel_path)
             
@@ -421,48 +447,112 @@ class GeminiService:
     # ==================== FUNCIONES AUXILIARES ====================
     
     def _crear_prompt_comprobante(self, empresa: Empresa) -> str:
-        """Crea prompt optimizado para comprobantes peruanos"""
+        """Crea prompt optimizado para cuadernos de registro manual"""
         return f"""
-        Eres un experto contador peruano analizando comprobantes para "{empresa.nombre}".
+        ANALIZA esta imagen de un CUADERNO O REGISTRO MANUAL de transacciones para la empresa "{empresa.nombre}" (Régimen: {empresa.regimen_tributario}).
         
-        Extrae TODA la información de este comprobante y devuelve un JSON con:
+        **CONTEXTO:**
+        Esta es una foto de un cuaderno/hoja donde el negocio anota manualmente sus transacciones del día.
+        Los datos están ESCRITOS A MANO y pueden incluir:
+        - INGRESOS: Ventas de productos/servicios, cobros, ventas del día
+        - EGRESOS/GASTOS: Compras, pagos de servicios, gastos operativos, proveedores
+        - Cantidades, precios, nombres de clientes/proveedores
+        - Métodos de pago, totales parciales
         
+        **TU TAREA:**
+        
+        1. Lee CUIDADOSAMENTE toda la escritura manual
+        2. Identifica CADA TRANSACCIÓN registrada (cada línea/entrada)
+        3. **CLASIFICA correctamente si es INGRESO o GASTO:**
+           - INGRESO: Ventas, cobros, dinero que ENTRA al negocio
+           - GASTO: Compras, pagos, gastos, dinero que SALE del negocio
+        4. Extrae: concepto, cantidad, precio unitario, total
+        5. Detecta el método de pago si está anotado
+        
+        **REGLAS DE CLASIFICACIÓN:**
+        
+        - **INGRESO** si:
+          - Dice "venta", "vendí", "cobro", "ingreso"
+          - Nombres de clientes comprando
+          - Lista de productos vendidos
+          - Dinero recibido por servicios
+        
+        - **GASTO** si:
+          - Dice "compra", "pago", "gasto", "egreso"
+          - Pagos a proveedores
+          - Compra de insumos/productos
+          - Servicios pagados (luz, agua, alquiler)
+          - Salarios, transporte, etc.
+        
+        **FORMATO DE RESPUESTA (JSON):**
+        ```json
         {{
-            "tipo_comprobante": "boleta/factura/ticket/nota de crédito/etc",
-            "emisor": "nombre del negocio emisor",
-            "ruc_emisor": "RUC si está visible",
-            "numero_comprobante": "número del comprobante",
-            "fecha": "fecha en formato YYYY-MM-DD",
+            "tipo_documento": "registro_manual",
+            "fecha": "YYYY-MM-DD (si está visible, sino usa la fecha actual)",
+            "origen": "Cuaderno de registro de transacciones",
             "transacciones": [
                 {{
-                    "tipo": "ingreso" o "gasto",
-                    "monto": número decimal (solo el total final),
-                    "descripcion": "descripción detallada",
-                    "categoria_sugerida": "categoría apropiada",
-                    "metodo_pago_sugerido": "Efectivo/Tarjeta/Yape/Plin/Transferencia",
-                    "confianza": porcentaje 0-100,
-                    "items": ["lista de items si es aplicable"],
-                    "subtotal": monto sin IGV,
-                    "igv": monto de IGV,
-                    "total": monto total
+                    "tipo": "ingreso o gasto",
+                    "monto": 25.50,
+                    "descripcion": "Venta/Compra/Pago de [concepto] - Cantidad: [X] - Precio unit: [Y]",
+                    "categoria_sugerida": "Ventas/Compras/Servicios/Alimentos/Gastos Operativos/etc",
+                    "metodo_pago_sugerido": "Efectivo/Yape/Plin/Tarjeta/Transferencia",
+                    "confianza": 90,
+                    "items": [
+                        "Producto 1: 2 unid x S/ 10.00 = S/ 20.00",
+                        "Producto 2: 1 unid x S/ 5.50 = S/ 5.50"
+                    ],
+                    "cliente_proveedor": "Nombre del cliente o proveedor si está visible",
+                    "numero_comprobante": "Si hay número de boleta/ticket anotado"
                 }}
             ],
-            "moneda": "PEN/USD",
+            "resumen": {{
+                "total_ingresos": 0,
+                "total_gastos": 0,
+                "saldo_neto": 0,
+                "cantidad_transacciones": 0,
+                "cantidad_ingresos": 0,
+                "cantidad_gastos": 0
+            }},
+            "moneda": "PEN",
             "metadatos": {{
+                "calidad_escritura": "legible/poco_legible/ilegible",
                 "calidad_imagen": "alta/media/baja",
-                "texto_legible": true/false,
-                "campos_faltantes": ["lista de campos que no se pudieron leer"]
+                "tipo_registro": "cuaderno/hoja_suelta/formato_impreso",
+                "campos_faltantes": ["Lista de información que no se pudo leer"],
+                "observaciones": "Notas importantes (ej: tachones, correcciones, anotaciones adicionales)"
             }}
         }}
+        ```
         
-        IMPORTANTE:
-        - Para Perú, el IGV es 18%
-        - Si es un gasto (compra), tipo = "gasto"
-        - Si es un ingreso (venta), tipo = "ingreso"
-        - Sé preciso con los montos
-        - Si algo no está claro, indica baja confianza
+        **CATEGORÍAS SUGERIDAS:**
         
-        Devuelve SOLO el JSON, sin texto adicional.
+        **Para INGRESOS:**
+        - "Ventas" (genérico)
+        - "Ventas - Productos"
+        - "Ventas - Servicios"
+        - "Ventas - Alimentos"
+        - "Cobros"
+        
+        **Para GASTOS:**
+        - "Compras"
+        - "Compra de Insumos"
+        - "Gastos Operativos"
+        - "Servicios (luz, agua, etc.)"
+        - "Transporte"
+        - "Salarios"
+        - "Alquiler"
+        - "Proveedores"
+        
+        **IMPORTANTE:**
+        - Sé MUY CUIDADOSO al clasificar ingreso vs gasto
+        - Si no está claro, usa el contexto (¿es dinero que entra o sale?)
+        - Si un precio no está claro, intenta inferirlo o indica baja confianza
+        - Si hay tachones o correcciones, usa el valor final corregido
+        - El método de pago por defecto es "Efectivo" si no se especifica
+        - Sé PACIENTE con la letra manuscrita
+        - Calcula los totales correctamente
+        - Devuelve ÚNICAMENTE el JSON, sin texto adicional
         """
     
     def _crear_prompt_excel(self, empresa: Empresa, excel_text: str) -> str:
