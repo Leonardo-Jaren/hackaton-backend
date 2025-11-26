@@ -8,6 +8,10 @@ class UserRegistrationSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
     password = serializers.CharField(write_only=True, required=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True, required=True, min_length=8)
+    rol = serializers.ChoiceField(choices=['administrador', 'cajero'], required=False, default='cajero')
+    empresa = serializers.IntegerField(required=False, allow_null=True)
+    first_name = serializers.CharField(required=False, allow_blank=True)
+    last_name = serializers.CharField(required=False, allow_blank=True)
 
     def validate(self, data):
         if data['password'] != data['password_confirm']:
@@ -38,9 +42,11 @@ class OTPValidationSerializer(serializers.Serializer):
 # --- Respuesta (Salida) ---
 class UserDetailSerializer(BaseModelSerializer):
     """Serializer para exponer los datos del usuario."""
+    empresa_nombre = serializers.CharField(source='empresa.nombre', read_only=True, allow_null=True)
+    
     class Meta:
         model = CustomUser
-        fields = ('id', 'email', 'first_name', 'last_name', 'avatar_url')
+        fields = ('id', 'email', 'first_name', 'last_name', 'avatar_url', 'rol', 'empresa', 'empresa_nombre')
 
 class TokenSerializer(serializers.Serializer):
     """Serializer para la respuesta con tokens."""

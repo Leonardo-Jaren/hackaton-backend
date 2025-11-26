@@ -70,17 +70,29 @@ class AuthService:
         return user
       
     # --- Lógica de Registro ---
-    def register_user(self, email, password):
+    def register_user(self, email, password, rol='cajero', empresa_id=None, first_name='', last_name=''):
         """Registra un nuevo usuario con correo/contraseña."""
         if self.user_repo.get_by_email(email):
             raise ValueError("El correo ya está registrado.")
         
-        user = self.user_repo.create_user_with_password(email=email, password=password)
+        user_data = {
+            'email': email,
+            'password': password,
+            'rol': rol,
+            'first_name': first_name,
+            'last_name': last_name,
+        }
+        
+        # Agregar empresa_id si se proporciona
+        if empresa_id:
+            user_data['empresa_id'] = empresa_id
+        
+        user = self.user_repo.create_user_with_password(**user_data)
         # Aquí se podría generar y enviar el primer OTP para verificar el email.
         return user
 
     # --- Lógica de Registro Social ---
-    def register_or_login_google(self, token: str):
+    def register_or_login_google(self, token: str, rol='cajero', empresa_id=None):
         """
         Valida el token de Google y registra/autentica al usuario.
         Retorna (usuario, es_nuevo).
@@ -98,12 +110,18 @@ class AuthService:
         
         if user is None:
             # El usuario no existe, lo creamos
-            user = self.user_repo.create_social_user(
-                email=email,
-                first_name=google_data.get('first_name'),
-                last_name=google_data.get('last_name'),
-                avatar_url=google_data.get('avatar_url')
-            )
+            user_data = {
+                'email': email,
+                'first_name': google_data.get('first_name'),
+                'last_name': google_data.get('last_name'),
+                'avatar_url': google_data.get('avatar_url'),
+                'rol': rol,
+            }
+            
+            if empresa_id:
+                user_data['empresa_id'] = empresa_id
+                
+            user = self.user_repo.create_social_user(**user_data)
             is_new = True
             logger.info(f"Nuevo usuario creado: {email}")
         else:

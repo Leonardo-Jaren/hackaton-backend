@@ -27,7 +27,11 @@ class RegisterView(BaseAPIView):
                 auth_service = AuthService()
                 user = auth_service.register_user(
                     email=serializer.validated_data['email'],
-                    password=serializer.validated_data['password']
+                    password=serializer.validated_data['password'],
+                    rol=serializer.validated_data.get('rol', 'cajero'),
+                    empresa_id=serializer.validated_data.get('empresa'),
+                    first_name=serializer.validated_data.get('first_name', ''),
+                    last_name=serializer.validated_data.get('last_name', '')
                 )
                 
                 # Opcional: Iniciar sesión inmediatamente
@@ -103,8 +107,14 @@ class GoogleAuthView(BaseAPIView):
         if serializer.is_valid():
             try:
                 auth_service = AuthService()
+                # Obtener campos opcionales del request
+                rol = request.data.get('rol', 'cajero')
+                empresa_id = request.data.get('empresa')
+                
                 user, is_new = auth_service.register_or_login_google(
-                    token=serializer.validated_data['token']
+                    token=serializer.validated_data['token'],
+                    rol=rol,
+                    empresa_id=empresa_id
                 )
 
                 # Generar tokens JWT para el usuario
