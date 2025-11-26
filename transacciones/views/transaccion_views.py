@@ -168,6 +168,45 @@ class TransaccionRegistroView(APIView):
         })
 
 
+class TransaccionDetailView(APIView):
+    """
+    PUT /api/v1/transacciones/registro/<pk>/
+    Actualizar una transacción
+    
+    DELETE /api/v1/transacciones/registro/<pk>/
+    Eliminar una transacción
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def put(self, request, pk):
+        try:
+            transaccion = Transaccion.objects.get(pk=pk)
+        except Transaccion.DoesNotExist:
+            return Response({'error': 'Transacción no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        
+        serializer = TransaccionCreateSerializer(transaccion, data=request.data)
+        
+        if serializer.is_valid():
+            transaccion = serializer.save()
+            return Response(
+                {
+                    'message': 'Transacción actualizada exitosamente',
+                    'data': TransaccionSerializer(transaccion).data
+                }
+            )
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def delete(self, request, pk):
+        try:
+            transaccion = Transaccion.objects.get(pk=pk)
+        except Transaccion.DoesNotExist:
+            return Response({'error': 'Transacción no encontrada'}, status=status.HTTP_404_NOT_FOUND)
+        
+        transaccion.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 # ============================================
 # PROCESAMIENTO IA
 # ============================================
