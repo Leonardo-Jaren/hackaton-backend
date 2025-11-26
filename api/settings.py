@@ -30,6 +30,9 @@ RESEND_FROM_EMAIL = env('RESEND_FROM_EMAIL')
 GOOGLE_CLIENT_ID = env('GOOGLE_CLIENT_ID')
 GOOGLE_CLIENT_SECRET = env('GOOGLE_CLIENT_SECRET')
 
+# Para OpenAI ChatGPT
+OPENAI_API_KEY = env('OPENAI_API_KEY', default='')
+
 # Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
