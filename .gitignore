@@ -128,4 +128,8 @@ Thumbs.db
 migrations/
 
 *.md
+
+# Migrations
+**/migrations/*.py
+!**/migrations/__init__.py
 media/
