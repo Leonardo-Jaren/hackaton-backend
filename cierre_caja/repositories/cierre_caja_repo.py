@@ -74,9 +74,9 @@ class TransaccionRepository:
         ).select_related('metodo_pago', 'categoria', 'cajero')
 
     @staticmethod
-    def calcular_total_por_tipo_y_metodo(cajero_id: int, tipo: str, metodo_pago_id: int = None):
-        """Calcula el total de transacciones por tipo y método de pago."""
-        filters = Q(cajero_id=cajero_id, tipo=tipo)
+    def calcular_total_por_tipo_y_metodo(empresa_id: int, tipo: str, metodo_pago_id: int = None):
+        """Calcula el total de transacciones por tipo y método de pago para una empresa."""
+        filters = Q(empresa_id=empresa_id, tipo=tipo)
         
         if metodo_pago_id:
             filters &= Q(metodo_pago_id=metodo_pago_id)
@@ -88,15 +88,15 @@ class TransaccionRepository:
         return result['total'] or Decimal('0.00')
 
     @staticmethod
-    def calcular_ventas_efectivo(cajero_id: int):
-        """Calcula el total de ventas en efectivo."""
+    def calcular_ventas_efectivo(empresa_id: int):
+        """Calcula el total de ventas en efectivo para una empresa."""
         metodo_efectivo = MetodoPago.objects.filter(nombre__iexact='efectivo').first()
         
         if not metodo_efectivo:
             return Decimal('0.00')
         
         return TransaccionRepository.calcular_total_por_tipo_y_metodo(
-            cajero_id=cajero_id,
+            empresa_id=empresa_id,
             tipo='ingreso',
             metodo_pago_id=metodo_efectivo.id
         )
@@ -107,5 +107,5 @@ class FondoCajaRepository(BaseRepository):
     model = FondoCaja
 
     def get_by_id_with_cajero(self, fondo_id: int):
-        """Obtiene un fondo de caja con información del cajero."""
-        return self.model.objects.select_related('cajero').filter(pk=fondo_id).first()
+        """Obtiene un fondo de caja con información del cajero (creado_por)."""
+        return self.model.objects.select_related('creado_por', 'empresa').filter(pk=fondo_id).first()
