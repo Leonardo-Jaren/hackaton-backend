@@ -142,8 +142,10 @@ class ResultadoIASerializer(serializers.ModelSerializer):
 class ResultadoIAListSerializer(serializers.ModelSerializer):
     """Serializer simplificado para listar resultados"""
     archivo_id = serializers.IntegerField(source='archivo.id', read_only=True)
-    categoria_sugerida_nombre = serializers.CharField(source='categoria_sugerida.nombre', read_only=True)
-    metodo_pago_sugerido_nombre = serializers.CharField(source='metodo_pago_sugerido.nombre', read_only=True)
+    # Los campos categoria_sugerida y metodo_pago_sugerido ya son strings (CharField)
+    # así que usamos SerializerMethodField para mantener compatibilidad con el frontend
+    categoria_sugerida_nombre = serializers.SerializerMethodField()
+    metodo_pago_sugerido_nombre = serializers.SerializerMethodField()
     
     class Meta:
         model = ResultadoIA
@@ -153,6 +155,14 @@ class ResultadoIAListSerializer(serializers.ModelSerializer):
             'metodo_pago_sugerido', 'metodo_pago_sugerido_nombre',
             'confianza', 'numero_comprobante', 'convertido_transaccion'
         ]
+    
+    def get_categoria_sugerida_nombre(self, obj):
+        """Retorna el nombre de la categoría (que ya es un string)"""
+        return obj.categoria_sugerida
+    
+    def get_metodo_pago_sugerido_nombre(self, obj):
+        """Retorna el nombre del método de pago (que ya es un string)"""
+        return obj.metodo_pago_sugerido
 
 
 class ResumenDiarioSerializer(serializers.Serializer):
