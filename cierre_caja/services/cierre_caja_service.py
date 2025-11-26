@@ -57,7 +57,7 @@ class CierreCajaService:
             raise ValueError(f"El FondoCaja con ID {fondo_caja_id} no existe.")
         
         # 2. Verificar que el usuario que inicia es el dueño del fondo
-        if fondo_caja.cajero_id != usuario_id:
+        if fondo_caja.creado_por_id != usuario_id:
             raise ValueError("Solo el cajero propietario del fondo puede iniciar el cierre.")
         
         # 3. Verificar que no haya un cierre abierto
@@ -71,7 +71,7 @@ class CierreCajaService:
         # 4. Crear el nuevo cierre
         cierre = self.cierre_repo.create(
             cajero_id=usuario_id,
-            empresa_id=fondo_caja.cajero.empresa_id,
+            empresa_id=fondo_caja.empresa_id,
             fondo_inicial_id=fondo_caja_id,
             estado='abierto'
         )
@@ -81,7 +81,7 @@ class CierreCajaService:
         return {
             'cierre_id': cierre.id,
             'estado': cierre.estado,
-            'fondo_inicial': fondo_caja.monto_inicial,
+            'fondo_inicial': fondo_caja.monto,
             'mensaje': 'Cierre de caja iniciado correctamente'
         }
 
@@ -111,19 +111,19 @@ class CierreCajaService:
         
         # 3. Calcular totales del sistema
         total_ingresos = TransaccionRepository.calcular_total_por_tipo_y_metodo(
-            cajero_id=usuario_id,
+            empresa_id=cierre.empresa_id,
             tipo='ingreso'
         )
         
         total_egresos = TransaccionRepository.calcular_total_por_tipo_y_metodo(
-            cajero_id=usuario_id,
+            empresa_id=cierre.empresa_id,
             tipo='gasto'
         )
         
-        saldo_esperado = cierre.fondo_inicial.monto_inicial + total_ingresos - total_egresos
+        saldo_esperado = cierre.fondo_inicial.monto + total_ingresos - total_egresos
         
         # 4. Calcular ventas en efectivo
-        ventas_efectivo = TransaccionRepository.calcular_ventas_efectivo(usuario_id)
+        ventas_efectivo = TransaccionRepository.calcular_ventas_efectivo(cierre.empresa_id)
         
         # 5. Obtener desglose por métodos de pago
         metodos_pago = MetodoPago.objects.all()
@@ -131,7 +131,7 @@ class CierreCajaService:
         
         for metodo in metodos_pago:
             total_metodo = TransaccionRepository.calcular_total_por_tipo_y_metodo(
-                cajero_id=usuario_id,
+                empresa_id=cierre.empresa_id,
                 tipo='ingreso',
                 metodo_pago_id=metodo.id
             )
@@ -192,7 +192,7 @@ class CierreCajaService:
             )
         
         # 4. Calcular ventas en efectivo según el sistema
-        ventas_efectivo_sistema = TransaccionRepository.calcular_ventas_efectivo(usuario_id)
+        ventas_efectivo_sistema = TransaccionRepository.calcular_ventas_efectivo(cierre.empresa_id)
         
         # 5. Calcular diferencia
         diferencia = efectivo_contado - ventas_efectivo_sistema
