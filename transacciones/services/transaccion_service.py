@@ -79,11 +79,11 @@ class TransaccionService:
     
     # ==================== PROCESAMIENTO IA ====================
     
-    @transaction.atomic
     def procesar_archivo_ia(self, archivo_id: int) -> ArchivoIA:
         """
         Procesa un archivo subido usando la API de GPT-4o
         """
+        archivo = None
         try:
             archivo = ArchivoIA.objects.get(id=archivo_id)
             archivo.estado = 'procesando'
@@ -108,16 +108,25 @@ class TransaccionService:
             archivo.estado = 'completado'
             archivo.save()
             
-            # Crear registros de ResultadoIA
+            # Crear registros de ResultadoIA (sin transaction.atomic para evitar bloqueos)
             self._crear_resultados_ia(archivo, resultado)
             
             return archivo
             
         except Exception as e:
-            archivo.estado = 'error'
-            archivo.error_mensaje = str(e)
-            archivo.save()
-            raise
+            import traceback
+            error_completo = traceback.format_exc()
+            print(f"❌ ERROR procesando archivo: {e}")
+            print(error_completo)
+            
+            if archivo:
+                archivo.estado = 'error'
+                archivo.error_mensaje = str(e)[:500]  # Limitar tamaño
+                try:
+                    archivo.save()
+                except:
+                    pass  # Si no puede guardar, al menos no rompa todo
+            raise ValidationError(f"Error procesando archivo: {str(e)}")
     
     def _procesar_imagen(self, file_path: str, empresa: Empresa) -> dict:
         """Procesa una imagen usando Google Gemini"""
@@ -142,17 +151,54 @@ class TransaccionService:
         """Crea registros de ResultadoIA a partir del JSON"""
         transacciones = resultado.get('transacciones', [])
         
-        for trans in transacciones:
-            ResultadoIA.objects.create(
-                archivo=archivo,
-                tipo=trans.get('tipo', 'ingreso'),
-                monto=Decimal(str(trans.get('monto', 0))),
-                descripcion=trans.get('descripcion', ''),
-                categoria_sugerida=trans.get('categoria_sugerida', ''),
-                metodo_pago_sugerido=trans.get('metodo_pago_sugerido', 'Efectivo'),
-                confianza=Decimal(str(trans.get('confianza', 0))),
-                numero_comprobante=trans.get('numero_comprobante', '')
-            )
+        print(f"📊 Creando {len(transacciones)} resultados de IA...")
+        print(f"🔍 Primer resultado para debug: {transacciones[0] if transacciones else 'VACIO'}")
+        
+        created_count = 0
+        for i, trans in enumerate(transacciones, 1):
+            try:
+                # Verificar que trans sea un diccionario
+                if trans is None:
+                    print(f"   ⚠️ Resultado #{i} es None, saltando...")
+                    continue
+                
+                if not isinstance(trans, dict):
+                    print(f"   ⚠️ Resultado #{i} no es dict: {type(trans)}, valor: {trans}")
+                    continue
+                
+                # Extraer valores con validación
+                tipo = trans.get('tipo', 'ingreso') if isinstance(trans.get('tipo'), str) else 'ingreso'
+                monto_raw = trans.get('monto', 0)
+                monto = Decimal(str(monto_raw)) if monto_raw is not None else Decimal('0')
+                descripcion = str(trans.get('descripcion', ''))[:500]
+                categoria = str(trans.get('categoria_sugerida', ''))[:100]
+                metodo = str(trans.get('metodo_pago_sugerido', 'Efectivo'))[:100]
+                confianza_raw = trans.get('confianza', 0)
+                confianza = Decimal(str(confianza_raw)) if confianza_raw is not None else Decimal('0')
+                comprobante = str(trans.get('numero_comprobante', ''))[:50]
+                
+                ResultadoIA.objects.create(
+                    archivo=archivo,
+                    tipo=tipo,
+                    monto=monto,
+                    descripcion=descripcion,
+                    categoria_sugerida=categoria,
+                    metodo_pago_sugerido=metodo,
+                    confianza=confianza,
+                    numero_comprobante=comprobante
+                )
+                created_count += 1
+                if i % 10 == 0:
+                    print(f"   ✓ Creados {i}/{len(transacciones)}...")
+            except Exception as e:
+                import traceback
+                print(f"   ✗ Error creando resultado #{i}: {e}")
+                print(f"   📋 Datos del resultado: {trans}")
+                print(f"   🔍 Traceback: {traceback.format_exc()}")
+                # Continuar con el siguiente
+                continue
+        
+        print(f"✅ Total creados: {created_count}/{len(transacciones)}")
     
     def obtener_resultados_ia(self, archivo_id: int = None, empresa_id: int = None):
         """Obtiene resultados de IA pendientes de conversión"""

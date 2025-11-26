@@ -6,8 +6,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from datetime import datetime, date
 
 from ..models import (
-    Transaccion, Empresa, CategoriaTransaccion, MetodoPago,
-    FondoCaja, ArchivoIA, ResultadoIA
+    Transaccion,
 )
 from ..serializers.transaccion_serializers import (
     TransaccionSerializer,
