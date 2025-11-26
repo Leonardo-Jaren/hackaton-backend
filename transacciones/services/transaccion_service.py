@@ -1,0 +1,306 @@
+from django.core.exceptions import ValidationError
+from django.db import transaction
+from ..repositories.transaccion_repo import TransaccionRepository
+from ..models import (
+    Transaccion, MetodoPago, CategoriaTransaccion,
+    FondoCaja, ArchivoIA, ResultadoIA, Empresa
+)
+from datetime import date, datetime
+from decimal import Decimal
+from typing import List, Dict
+import os
+import base64
+import json
+
+
+class TransaccionService:
+    def __init__(self):
+        self.repo = TransaccionRepository()
+    
+    # ==================== FONDO DE CAJA ====================
+    
+    def crear_fondo_caja(self, empresa_id: int, monto: Decimal, user, observaciones: str = "") -> FondoCaja:
+        """Crea el fondo inicial de caja para el día"""
+        # Validar que no exista un fondo para hoy
+        hoy = date.today()
+        existe = FondoCaja.objects.filter(
+            empresa_id=empresa_id,
+            fecha=hoy
+        ).exists()
+        
+        if existe:
+            raise ValidationError(
+                f"Ya existe un fondo de caja para la empresa en la fecha {hoy}"
+            )
+        
+        if monto <= 0:
+            raise ValidationError("El monto del fondo debe ser mayor a 0")
+        
+        fondo = FondoCaja.objects.create(
+            empresa_id=empresa_id,
+            monto=monto,
+            creado_por=user,
+            observaciones=observaciones
+        )
+        
+        return fondo
+    
+    # ==================== TRANSACCIONES MANUALES ====================
+    
+    def crear_transaccion(self, data: dict) -> Transaccion:
+        """Crea una nueva transacción manual"""
+        # Validar monto
+        if data.get('monto', 0) <= 0:
+            raise ValidationError("El monto de la transacción debe ser mayor a 0")
+        
+        # Validar que la categoría corresponda al tipo
+        categoria_id = data['categoria'].id if hasattr(data['categoria'], 'id') else data['categoria']
+        categoria = CategoriaTransaccion.objects.get(id=categoria_id)
+        
+        if categoria.tipo != data['tipo']:
+            raise ValidationError(
+                f"La categoría '{categoria.nombre}' no es válida para el tipo '{data['tipo']}'"
+            )
+        
+        return self.repo.create(**data)
+    
+    def obtener_transacciones_dia(self, empresa_id: int, fecha: date = None):
+        """Obtiene transacciones del día (por defecto hoy)"""
+        if fecha is None:
+            fecha = date.today()
+        return self.repo.obtener_transacciones_por_fecha(empresa_id, fecha)
+    
+    def obtener_resumen_dia(self, empresa_id: int, fecha: date = None) -> Dict:
+        """Genera resumen diario"""
+        if fecha is None:
+            fecha = date.today()
+        return self.repo.obtener_resumen_diario(empresa_id, fecha)
+    
+    # ==================== PROCESAMIENTO IA ====================
+    
+    @transaction.atomic
+    def procesar_archivo_ia(self, archivo_id: int) -> ArchivoIA:
+        """
+        Procesa un archivo subido usando la API de GPT-4o
+        """
+        try:
+            archivo = ArchivoIA.objects.get(id=archivo_id)
+            archivo.estado = 'procesando'
+            archivo.save()
+            
+            # Leer el archivo
+            file_path = archivo.archivo.path
+            file_ext = os.path.splitext(file_path)[1].lower()
+            
+            # Llamar a la API de OpenAI según el tipo de archivo
+            if file_ext in ['.jpg', '.jpeg', '.png']:
+                resultado = self._procesar_imagen(file_path, archivo.empresa)
+            elif file_ext == '.pdf':
+                resultado = self._procesar_pdf(file_path, archivo.empresa)
+            elif file_ext in ['.xlsx', '.xls']:
+                resultado = self._procesar_excel(file_path, archivo.empresa)
+            else:
+                raise ValidationError(f"Formato de archivo no soportado: {file_ext}")
+            
+            # Guardar resultados
+            archivo.resultado_json = resultado
+            archivo.estado = 'completado'
+            archivo.save()
+            
+            # Crear registros de ResultadoIA
+            self._crear_resultados_ia(archivo, resultado)
+            
+            return archivo
+            
+        except Exception as e:
+            archivo.estado = 'error'
+            archivo.error_mensaje = str(e)
+            archivo.save()
+            raise
+    
+    def _procesar_imagen(self, file_path: str, empresa: Empresa) -> dict:
+        """Procesa una imagen usando GPT-4o Vision"""
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+            
+            # Leer y codificar la imagen
+            with open(file_path, 'rb') as image_file:
+                base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+            
+            # Prompt para GPT-4o
+            prompt = f"""
+            Analiza esta imagen de comprobantes/tickets de {empresa.nombre}.
+            Extrae TODAS las transacciones visibles y devuelve un JSON con el siguiente formato:
+            
+            {{
+                "transacciones": [
+                    {{
+                        "tipo": "ingreso" o "gasto",
+                        "monto": número decimal,
+                        "descripcion": "descripción detallada",
+                        "categoria_sugerida": "nombre de categoría",
+                        "metodo_pago_sugerido": "Efectivo/Tarjeta/Transferencia/Yape/Plin",
+                        "numero_comprobante": "número si existe",
+                        "confianza": porcentaje de confianza (0-100)
+                    }}
+                ]
+            }}
+            
+            Categorías comunes: Ventas, Compras, Servicios, Suministros, Gastos Operativos, Otros.
+            Sé preciso con los montos y extrae TODO lo visible.
+            """
+            
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{base64_image}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=2000,
+                temperature=0.2
+            )
+            
+            # Parsear respuesta
+            content = response.choices[0].message.content
+            # Extraer JSON de la respuesta (puede venir con markdown)
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0]
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0]
+            
+            resultado = json.loads(content.strip())
+            return resultado
+            
+        except Exception as e:
+            raise ValidationError(f"Error al procesar imagen con GPT-4o: {str(e)}")
+    
+    def _procesar_pdf(self, file_path: str, empresa: Empresa) -> dict:
+        """Procesa un PDF (implementar según necesidad)"""
+        # TODO: Implementar extracción de texto del PDF y procesamiento con GPT-4
+        raise ValidationError("Procesamiento de PDF aún no implementado")
+    
+    def _procesar_excel(self, file_path: str, empresa: Empresa) -> dict:
+        """Procesa un archivo Excel"""
+        try:
+            import pandas as pd
+            from openai import OpenAI
+            client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+            
+            # Leer Excel
+            df = pd.read_excel(file_path)
+            
+            # Convertir a texto para GPT
+            excel_text = df.to_string()
+            
+            prompt = f"""
+            Analiza esta tabla de Excel de {empresa.nombre} y extrae las transacciones.
+            
+            Datos:
+            {excel_text}
+            
+            Devuelve un JSON con el siguiente formato:
+            {{
+                "transacciones": [
+                    {{
+                        "tipo": "ingreso" o "gasto",
+                        "monto": número decimal,
+                        "descripcion": "descripción",
+                        "categoria_sugerida": "categoría",
+                        "metodo_pago_sugerido": "método",
+                        "numero_comprobante": "número",
+                        "confianza": porcentaje (0-100)
+                    }}
+                ]
+            }}
+            """
+            
+            response = client.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.2
+            )
+            
+            resultado = json.loads(response.choices[0].message.content)
+            return resultado
+            
+        except Exception as e:
+            raise ValidationError(f"Error al procesar Excel: {str(e)}")
+    
+    def _crear_resultados_ia(self, archivo: ArchivoIA, resultado: dict):
+        """Crea registros de ResultadoIA a partir del JSON"""
+        transacciones = resultado.get('transacciones', [])
+        
+        for trans in transacciones:
+            ResultadoIA.objects.create(
+                archivo=archivo,
+                tipo=trans.get('tipo', 'ingreso'),
+                monto=Decimal(str(trans.get('monto', 0))),
+                descripcion=trans.get('descripcion', ''),
+                categoria_sugerida=trans.get('categoria_sugerida', ''),
+                metodo_pago_sugerido=trans.get('metodo_pago_sugerido', 'Efectivo'),
+                confianza=Decimal(str(trans.get('confianza', 0))),
+                numero_comprobante=trans.get('numero_comprobante', '')
+            )
+    
+    def obtener_resultados_ia(self, archivo_id: int = None, empresa_id: int = None):
+        """Obtiene resultados de IA pendientes de conversión"""
+        queryset = ResultadoIA.objects.filter(convertido_transaccion=False)
+        
+        if archivo_id:
+            queryset = queryset.filter(archivo_id=archivo_id)
+        
+        if empresa_id:
+            queryset = queryset.filter(archivo__empresa_id=empresa_id)
+        
+        return queryset.select_related('archivo')
+    
+    @transaction.atomic
+    def convertir_resultado_a_transaccion(self, resultado_id: int) -> Transaccion:
+        """Convierte un ResultadoIA en una Transacción real"""
+        resultado = ResultadoIA.objects.get(id=resultado_id)
+        
+        if resultado.convertido_transaccion:
+            raise ValidationError("Este resultado ya fue convertido a transacción")
+        
+        # Buscar o crear categoría
+        categoria, _ = CategoriaTransaccion.objects.get_or_create(
+            nombre=resultado.categoria_sugerida,
+            defaults={'tipo': resultado.tipo}
+        )
+        
+        # Buscar o crear método de pago
+        metodo, _ = MetodoPago.objects.get_or_create(
+            nombre=resultado.metodo_pago_sugerido
+        )
+        
+        # Crear transacción
+        transaccion = Transaccion.objects.create(
+            empresa=resultado.archivo.empresa,
+            categoria=categoria,
+            metodo_pago=metodo,
+            tipo=resultado.tipo,
+            monto=resultado.monto,
+            descripcion=resultado.descripcion,
+            numero_comprobante=resultado.numero_comprobante,
+            procesado_ia=True,
+            confianza_ia=resultado.confianza
+        )
+        
+        # Marcar resultado como convertido
+        resultado.convertido_transaccion = True
+        resultado.transaccion = transaccion
+        resultado.save()
+        
+        return transaccion
