@@ -142,12 +142,15 @@ class ResultadoIASerializer(serializers.ModelSerializer):
 class ResultadoIAListSerializer(serializers.ModelSerializer):
     """Serializer simplificado para listar resultados"""
     archivo_id = serializers.IntegerField(source='archivo.id', read_only=True)
+    categoria_sugerida_nombre = serializers.CharField(source='categoria_sugerida.nombre', read_only=True)
+    metodo_pago_sugerido_nombre = serializers.CharField(source='metodo_pago_sugerido.nombre', read_only=True)
     
     class Meta:
         model = ResultadoIA
         fields = [
             'id', 'archivo_id', 'tipo', 'monto', 'descripcion',
-            'categoria_sugerida', 'metodo_pago_sugerido',
+            'categoria_sugerida', 'categoria_sugerida_nombre',
+            'metodo_pago_sugerido', 'metodo_pago_sugerido_nombre',
             'confianza', 'numero_comprobante', 'convertido_transaccion'
         ]
 
